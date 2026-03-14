@@ -7,6 +7,7 @@ from pathlib import Path
 APP_NAME = "ytb-downloader"
 WINDOW_TITLE = "YTB Downloader"
 DOWNLOAD_FOLDER_NAME = "downloads"
+HISTORY_FILE_NAME = "history.json"
 DEFAULT_TEMPLATE = "%(title)s.%(ext)s"
 
 
@@ -16,6 +17,10 @@ def project_root() -> Path:
 
 def default_download_dir() -> Path:
     return project_root() / DOWNLOAD_FOLDER_NAME
+
+
+def history_file() -> Path:
+    return project_root() / HISTORY_FILE_NAME
 
 
 def user_bin_dir() -> Path:

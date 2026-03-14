@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import threading
-from pathlib import Path
 
 from .config import WINDOW_TITLE, default_download_dir
 from .downloader import download
+from .history import load_history
 from .models import DownloadRequest
 from .utils import dedupe_entries, display_video_input, load_batch_entries, normalize_destination, normalize_video_input, open_in_file_manager
 
@@ -33,6 +33,7 @@ class DownloaderGUI:
         self.video_quality_var = tk.StringVar(value="best")
         self.status_var = tk.StringVar(value="Pronto. Cole um link, um ID do video ou importe um TXT.")
         self.queue_count_var = tk.StringVar(value="Fila: 0 item")
+        self.history_count_var = tk.StringVar(value="Historico: 0 item")
 
         self._configure_styles()
         self._build()
@@ -138,7 +139,7 @@ class DownloaderGUI:
         utility_actions.columnconfigure(1, weight=1)
         self.open_folder_button = self.ttk.Button(utility_actions, text="Abrir downloads", command=self._open_downloads_folder)
         self.open_folder_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        self.stop_button = self.ttk.Button(utility_actions, text="Parar apos atual", command=self._request_stop)
+        self.stop_button = self.ttk.Button(utility_actions, text="Cancelar agora", command=self._request_stop)
         self.stop_button.grid(row=0, column=1, sticky="ew", padx=(6, 0))
         self.stop_button.state(["disabled"])
 
@@ -180,6 +181,26 @@ class DownloaderGUI:
         self.remove_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         self.clear_button = self.ttk.Button(queue_actions, text="Limpar fila", command=self._clear_queue)
         self.clear_button.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+
+        self.ttk.Label(parent, text="Historico recente", style="Section.TLabel").grid(row=4, column=0, sticky="w", pady=(18, 0))
+        self.ttk.Label(parent, textvariable=self.history_count_var, style="Body.TLabel").grid(row=5, column=0, sticky="w", pady=(4, 10))
+
+        history_columns = ("time", "input", "status")
+        self.history_tree = self.ttk.Treeview(parent, columns=history_columns, show="headings", height=7, style="Queue.Treeview")
+        self.history_tree.heading("time", text="Horario")
+        self.history_tree.heading("input", text="Video / ID")
+        self.history_tree.heading("status", text="Status")
+        self.history_tree.column("time", width=135, anchor="center")
+        self.history_tree.column("input", width=190, anchor="w")
+        self.history_tree.column("status", width=90, anchor="center")
+        self.history_tree.grid(row=6, column=0, sticky="nsew")
+
+        history_actions = self.ttk.Frame(parent, style="Card.TFrame")
+        history_actions.grid(row=7, column=0, sticky="ew", pady=(12, 0))
+        history_actions.columnconfigure(0, weight=1)
+        self.refresh_history_button = self.ttk.Button(history_actions, text="Atualizar historico", command=self._refresh_history)
+        self.refresh_history_button.grid(row=0, column=0, sticky="ew")
+        self._refresh_history()
 
     def _refresh_quality_state(self) -> None:
         is_audio = self.media_var.get() == "mp3"
@@ -279,8 +300,8 @@ class DownloaderGUI:
 
         for index, item in enumerate(queue_snapshot):
             if self.stop_requested:
-                results.append("Parado")
-                self._set_row_status(index, "Parado")
+                results.append("Cancelado")
+                self._set_row_status(index, "Cancelado")
                 continue
             self._set_row_status(index, "Baixando")
             self._set_status(f"Baixando {index + 1}/{len(self.queue)}: {item['display']}")
@@ -293,14 +314,14 @@ class DownloaderGUI:
                 audio_bitrate=item["quality"] if item["format"] == "mp3" else self.audio_quality_var.get(),
                 video_quality=item["quality"] if item["format"] == "mp4" else self.video_quality_var.get(),
             )
-            result = download(request, callback=self._set_status)
-            final_status = "Concluido" if result.success else "Erro"
+            result = download(request, callback=self._set_status, cancel_check=lambda: self.stop_requested)
+            final_status = "Cancelado" if result.cancelled else ("Concluido" if result.success else "Erro")
             self._set_row_status(index, final_status)
             results.append(final_status)
             if self.stop_requested:
                 for remaining_index in range(index + 1, len(queue_snapshot)):
-                    self._set_row_status(remaining_index, "Parado")
-                    results.append("Parado")
+                    self._set_row_status(remaining_index, "Cancelado")
+                    results.append("Cancelado")
                 break
 
         success_count = sum(1 for item in results if item == "Concluido")
@@ -313,11 +334,12 @@ class DownloaderGUI:
         self.is_downloading = False
         self.stop_requested = False
         self._set_controls_enabled(True)
-        stopped_count = sum(1 for item in results if item == "Parado")
-        self.status_var.set(f"Fila finalizada: {success_count}/{total} concluido(s), {stopped_count} parado(s).")
+        cancelled_count = sum(1 for item in results if item == "Cancelado")
+        self._refresh_history()
+        self.status_var.set(f"Fila finalizada: {success_count}/{total} concluido(s), {cancelled_count} cancelado(s).")
         messagebox.showinfo(
             WINDOW_TITLE,
-            f"Fila finalizada: {success_count}/{total} download(s) concluido(s), {stopped_count} parado(s).",
+            f"Fila finalizada: {success_count}/{total} download(s) concluido(s), {cancelled_count} cancelado(s).",
         )
 
     def _set_status(self, message: str) -> None:
@@ -366,6 +388,7 @@ class DownloaderGUI:
             self.remove_button,
             self.clear_button,
             self.open_folder_button,
+            self.refresh_history_button,
         ):
             widget.state(state)
         self.stop_button.state(stop_state)
@@ -379,7 +402,27 @@ class DownloaderGUI:
 
     def _request_stop(self) -> None:
         self.stop_requested = True
-        self.status_var.set("Parada solicitada. A fila sera encerrada apos o item atual.")
+        self.status_var.set("Cancelamento solicitado. O download atual sera interrompido.")
+
+    def _refresh_history(self) -> None:
+        for item_id in self.history_tree.get_children():
+            self.history_tree.delete(item_id)
+
+        history_entries = load_history(limit=12)
+        for entry in reversed(history_entries):
+            self.history_tree.insert(
+                "",
+                "end",
+                values=(
+                    entry.get("timestamp", "-"),
+                    display_video_input(entry.get("source", "-")),
+                    entry.get("status", "-"),
+                ),
+            )
+
+        total = len(history_entries)
+        label = "item" if total == 1 else "itens"
+        self.history_count_var.set(f"Historico: {total} {label}")
 
     def run(self) -> None:
         self.root.mainloop()

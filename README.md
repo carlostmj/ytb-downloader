@@ -165,9 +165,12 @@ A interface grafica agora permite:
 - colar URL completa ou apenas o ID do video
 - importar TXT com um item por linha
 - remover duplicados da fila
+- ver historico recente de downloads
 - abrir a pasta de downloads
-- parar a fila apos o item atual
+- cancelar o download atual de verdade
 - escolher qualidade de audio e video
+
+O historico fica salvo localmente em `history.json` na raiz do projeto.
 
 ## Publicar no GitHub
 

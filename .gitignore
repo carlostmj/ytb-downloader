@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 downloads/
+history.json
 dist/
 build/
 *.egg-info/

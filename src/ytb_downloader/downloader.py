@@ -3,14 +3,22 @@ from __future__ import annotations
 import re
 from typing import Callable
 
+from .history import append_history
 from .models import DownloadRequest, DownloadResult
 from .utils import ensure_directory
 
 ProgressCallback = Callable[[str], None]
+CancelCheck = Callable[[], bool]
 
 
-def _progress_hook(callback: ProgressCallback | None):
+class DownloadCancelled(Exception):
+    """Raised when the current download should stop immediately."""
+
+
+def _progress_hook(callback: ProgressCallback | None, cancel_check: CancelCheck | None):
     def hook(data: dict) -> None:
+        if cancel_check is not None and cancel_check():
+            raise DownloadCancelled
         if callback is None:
             return
         status = data.get("status")
@@ -38,13 +46,17 @@ def normalize_video_quality(raw_value: str | int | None) -> str:
     return digits or "best"
 
 
-def build_options(request: DownloadRequest, callback: ProgressCallback | None = None) -> dict:
+def build_options(
+    request: DownloadRequest,
+    callback: ProgressCallback | None = None,
+    cancel_check: CancelCheck | None = None,
+) -> dict:
     ensure_directory(request.destination)
     output_path = str(request.destination / request.filename_template)
     options = {
         "outtmpl": output_path,
         "noplaylist": True,
-        "progress_hooks": [_progress_hook(callback)],
+        "progress_hooks": [_progress_hook(callback, cancel_check)],
         "quiet": True,
         "no_warnings": True,
     }
@@ -77,21 +89,38 @@ def build_options(request: DownloadRequest, callback: ProgressCallback | None = 
     return options
 
 
-def download(request: DownloadRequest, callback: ProgressCallback | None = None) -> DownloadResult:
+def download(
+    request: DownloadRequest,
+    callback: ProgressCallback | None = None,
+    cancel_check: CancelCheck | None = None,
+) -> DownloadResult:
     try:
         from yt_dlp import YoutubeDL
 
-        options = build_options(request, callback)
+        options = build_options(request, callback, cancel_check)
         with YoutubeDL(options) as ydl:
             ydl.download([request.link])
-        return DownloadResult(
+        result = DownloadResult(
             success=True,
             message="Download finalizado com sucesso.",
             destination=request.destination,
         )
+        append_history(request, result)
+        return result
+    except DownloadCancelled:
+        result = DownloadResult(
+            success=False,
+            message="Download cancelado pelo usuario.",
+            destination=request.destination,
+            cancelled=True,
+        )
+        append_history(request, result)
+        return result
     except Exception as exc:  # pragma: no cover - depende do ambiente
-        return DownloadResult(
+        result = DownloadResult(
             success=False,
             message=f"Falha no download: {exc}",
             destination=request.destination,
         )
+        append_history(request, result)
+        return result

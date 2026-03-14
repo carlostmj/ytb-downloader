@@ -20,3 +20,4 @@ class DownloadResult:
     success: bool
     message: str
     destination: Path
+    cancelled: bool = False
