@@ -171,6 +171,7 @@ A interface grafica agora permite:
 - escolher qualidade de audio e video
 - lembrar pasta, formato e qualidade usados por ultimo
 - mostrar percentual real do item atual e andamento da fila
+- configurar popup final, abertura automatica da pasta e quantidade de historico visivel em uma aba propria
 
 O historico fica salvo localmente em `history.json` na raiz do projeto.
 As preferencias da GUI ficam salvas localmente em `preferences.json` na raiz do projeto.

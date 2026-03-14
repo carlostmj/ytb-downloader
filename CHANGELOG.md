@@ -14,6 +14,7 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - Shared deduplication for repeated items in TXT imports and CLI batch processing.
 - Persistent download history stored locally and displayed inside the GUI.
 - Persistent GUI preferences for destination folder, selected format and chosen quality values.
+- Dedicated settings tab in the GUI with controls for popup behavior, auto-open folder, and visible history size.
 
 ### Changed
 
@@ -21,6 +22,7 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - GUI now blocks queue-editing actions while downloads are running to avoid inconsistent state.
 - GUI stop control now performs real in-progress cancellation instead of only stopping after the current item.
 - GUI progress area now shows real per-item percentage and queue progress instead of only an indeterminate bar.
+- GUI is now organized with separate tabs for downloads and configuration.
 
 ### Fixed
 

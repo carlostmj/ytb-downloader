@@ -42,3 +42,8 @@ def append_history(request: DownloadRequest, result: DownloadResult) -> None:
         }
     )
     file_path.write_text(json.dumps(entries[-200:], indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def clear_history() -> None:
+    file_path = history_file()
+    file_path.write_text("[]", encoding="utf-8")

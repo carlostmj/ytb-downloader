@@ -5,7 +5,7 @@ from typing import Any
 
 from .config import WINDOW_TITLE, default_download_dir
 from .downloader import download
-from .history import load_history
+from .history import clear_history, load_history
 from .models import DownloadRequest
 from .preferences import load_preferences, save_preferences
 from .utils import dedupe_entries, display_video_input, load_batch_entries, normalize_destination, normalize_video_input, open_in_file_manager
@@ -20,8 +20,8 @@ class DownloaderGUI:
         self.ttk = ttk
         self.root = tk.Tk()
         self.root.title(WINDOW_TITLE)
-        self.root.geometry("980x690")
-        self.root.minsize(860, 620)
+        self.root.geometry("980x720")
+        self.root.minsize(900, 640)
         self.root.configure(bg="#f4efe6")
 
         self.preferences = load_preferences()
@@ -30,10 +30,13 @@ class DownloaderGUI:
         self.stop_requested = False
 
         self.link_var = tk.StringVar()
-        self.destination_var = tk.StringVar(value=self.preferences["destination"])
-        self.media_var = tk.StringVar(value=self.preferences["media_format"])
-        self.audio_quality_var = tk.StringVar(value=self.preferences["audio_quality"])
-        self.video_quality_var = tk.StringVar(value=self.preferences["video_quality"])
+        self.destination_var = tk.StringVar(value=str(self.preferences["destination"]))
+        self.media_var = tk.StringVar(value=str(self.preferences["media_format"]))
+        self.audio_quality_var = tk.StringVar(value=str(self.preferences["audio_quality"]))
+        self.video_quality_var = tk.StringVar(value=str(self.preferences["video_quality"]))
+        self.auto_open_folder_var = tk.BooleanVar(value=bool(self.preferences["auto_open_folder"]))
+        self.show_completion_popup_var = tk.BooleanVar(value=bool(self.preferences["show_completion_popup"]))
+        self.history_limit_var = tk.StringVar(value=str(self.preferences["history_limit"]))
         self.status_var = tk.StringVar(value="Pronto. Cole um link, um ID do video ou importe um TXT.")
         self.queue_count_var = tk.StringVar(value="Fila: 0 item")
         self.history_count_var = tk.StringVar(value="Historico: 0 item")
@@ -70,17 +73,27 @@ class DownloaderGUI:
 
         content = self.ttk.Frame(self.root, style="Root.TFrame", padding=(24, 0, 24, 24))
         content.pack(fill="both", expand=True)
-        content.columnconfigure(0, weight=5)
-        content.columnconfigure(1, weight=4)
-        content.rowconfigure(0, weight=1)
 
-        left_card = self.ttk.Frame(content, style="Card.TFrame", padding=20)
+        notebook = self.ttk.Notebook(content)
+        notebook.pack(fill="both", expand=True)
+
+        downloads_tab = self.ttk.Frame(notebook, style="Root.TFrame", padding=6)
+        settings_tab = self.ttk.Frame(notebook, style="Root.TFrame", padding=6)
+        notebook.add(downloads_tab, text="Downloads")
+        notebook.add(settings_tab, text="Configuracoes")
+
+        downloads_tab.columnconfigure(0, weight=5)
+        downloads_tab.columnconfigure(1, weight=4)
+        downloads_tab.rowconfigure(0, weight=1)
+
+        left_card = self.ttk.Frame(downloads_tab, style="Card.TFrame", padding=20)
         left_card.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
-        right_card = self.ttk.Frame(content, style="Card.TFrame", padding=20)
+        right_card = self.ttk.Frame(downloads_tab, style="Card.TFrame", padding=20)
         right_card.grid(row=0, column=1, sticky="nsew")
 
         self._build_form(left_card)
         self._build_queue(right_card)
+        self._build_settings(settings_tab)
 
     def _build_form(self, parent) -> None:
         parent.columnconfigure(0, weight=1)
@@ -103,21 +116,11 @@ class DownloaderGUI:
         self.ttk.Radiobutton(format_box, text="MP4", value="mp4", variable=self.media_var, command=self._refresh_quality_state).pack(side="left", padx=(10, 0))
 
         self.ttk.Label(parent, text="Qualidade MP3", style="Section.TLabel").grid(row=4, column=0, sticky="w")
-        self.audio_quality_box = self.ttk.Combobox(
-            parent,
-            textvariable=self.audio_quality_var,
-            values=("128", "192", "256", "320"),
-            state="readonly",
-        )
+        self.audio_quality_box = self.ttk.Combobox(parent, textvariable=self.audio_quality_var, values=("128", "192", "256", "320"), state="readonly")
         self.audio_quality_box.grid(row=5, column=0, sticky="ew", pady=(4, 14), padx=(0, 10))
 
         self.ttk.Label(parent, text="Qualidade MP4", style="Section.TLabel").grid(row=4, column=1, sticky="w")
-        self.video_quality_box = self.ttk.Combobox(
-            parent,
-            textvariable=self.video_quality_var,
-            values=("best", "1080", "720", "480", "360"),
-            state="readonly",
-        )
+        self.video_quality_box = self.ttk.Combobox(parent, textvariable=self.video_quality_var, values=("best", "1080", "720", "480", "360"), state="readonly")
         self.video_quality_box.grid(row=5, column=1, sticky="ew", pady=(4, 14))
 
         self.ttk.Label(parent, text="Pasta de destino", style="Section.TLabel").grid(row=6, column=0, sticky="w")
@@ -206,9 +209,56 @@ class DownloaderGUI:
         history_actions = self.ttk.Frame(parent, style="Card.TFrame")
         history_actions.grid(row=7, column=0, sticky="ew", pady=(12, 0))
         history_actions.columnconfigure(0, weight=1)
+        history_actions.columnconfigure(1, weight=1)
         self.refresh_history_button = self.ttk.Button(history_actions, text="Atualizar historico", command=self._refresh_history)
-        self.refresh_history_button.grid(row=0, column=0, sticky="ew")
+        self.refresh_history_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.clear_history_button = self.ttk.Button(history_actions, text="Limpar historico", command=self._clear_history)
+        self.clear_history_button.grid(row=0, column=1, sticky="ew", padx=(6, 0))
         self._refresh_history()
+
+    def _build_settings(self, parent) -> None:
+        settings_card = self.ttk.Frame(parent, style="Card.TFrame", padding=20)
+        settings_card.pack(fill="both", expand=True)
+        settings_card.columnconfigure(0, weight=1)
+
+        self.ttk.Label(settings_card, text="Preferencias da aplicacao", style="Section.TLabel").grid(row=0, column=0, sticky="w")
+        self.ttk.Label(
+            settings_card,
+            text="As opcoes abaixo ficam salvas automaticamente para os proximos usos da GUI.",
+            style="Body.TLabel",
+        ).grid(row=1, column=0, sticky="w", pady=(4, 18))
+
+        self.auto_open_folder_check = self.ttk.Checkbutton(
+            settings_card,
+            text="Abrir a pasta de downloads automaticamente ao terminar",
+            variable=self.auto_open_folder_var,
+        )
+        self.auto_open_folder_check.grid(row=2, column=0, sticky="w", pady=(0, 12))
+
+        self.show_popup_check = self.ttk.Checkbutton(
+            settings_card,
+            text="Mostrar popup quando a fila terminar",
+            variable=self.show_completion_popup_var,
+        )
+        self.show_popup_check.grid(row=3, column=0, sticky="w", pady=(0, 18))
+
+        self.ttk.Label(settings_card, text="Itens visiveis no historico", style="Section.TLabel").grid(row=4, column=0, sticky="w")
+        self.history_limit_box = self.ttk.Combobox(
+            settings_card,
+            textvariable=self.history_limit_var,
+            values=("5", "10", "12", "20", "30"),
+            state="readonly",
+            width=10,
+        )
+        self.history_limit_box.grid(row=5, column=0, sticky="w", pady=(4, 18))
+
+        self.ttk.Label(settings_card, text="Observacao", style="Section.TLabel").grid(row=6, column=0, sticky="w")
+        self.ttk.Label(
+            settings_card,
+            text="Formato, pasta de destino e qualidades escolhidas na aba Downloads tambem sao salvos automaticamente.",
+            style="Body.TLabel",
+            wraplength=520,
+        ).grid(row=7, column=0, sticky="w", pady=(4, 0))
 
     def _refresh_quality_state(self) -> None:
         is_audio = self.media_var.get() == "mp3"
@@ -243,9 +293,7 @@ class DownloaderGUI:
     def _import_txt(self) -> None:
         from tkinter import filedialog, messagebox
 
-        path = filedialog.askopenfilename(
-            filetypes=[("Arquivos de texto", "*.txt"), ("Todos os arquivos", "*.*")]
-        )
+        path = filedialog.askopenfilename(filetypes=[("Arquivos de texto", "*.txt"), ("Todos os arquivos", "*.*")])
         if not path:
             return
 
@@ -317,7 +365,7 @@ class DownloaderGUI:
                 continue
             self._set_row_status(index, "Baixando")
             self._set_queue_progress(index, len(queue_snapshot))
-            self._set_status(f"Baixando {index + 1}/{len(self.queue)}: {item['display']}")
+            self._set_status(f"Baixando {index + 1}/{len(queue_snapshot)}: {item['display']}")
 
             request = DownloadRequest(
                 link=item["source"],
@@ -352,10 +400,13 @@ class DownloaderGUI:
         self.current_progress_var.set("Progresso atual: 0%")
         self.queue_progress_var.set(f"Andamento da fila: {total}/{total}")
         self.status_var.set(f"Fila finalizada: {success_count}/{total} concluido(s), {cancelled_count} cancelado(s).")
-        messagebox.showinfo(
-            WINDOW_TITLE,
-            f"Fila finalizada: {success_count}/{total} download(s) concluido(s), {cancelled_count} cancelado(s).",
-        )
+        if self.show_completion_popup_var.get():
+            messagebox.showinfo(
+                WINDOW_TITLE,
+                f"Fila finalizada: {success_count}/{total} download(s) concluido(s), {cancelled_count} cancelado(s).",
+            )
+        if self.auto_open_folder_var.get():
+            self._open_downloads_folder()
 
     def _set_status(self, message: str) -> None:
         self.root.after(0, lambda: self.status_var.set(message))
@@ -418,6 +469,10 @@ class DownloaderGUI:
             self.clear_button,
             self.open_folder_button,
             self.refresh_history_button,
+            self.clear_history_button,
+            self.auto_open_folder_check,
+            self.show_popup_check,
+            self.history_limit_box,
         ):
             widget.state(state)
         self.stop_button.state(stop_state)
@@ -437,7 +492,8 @@ class DownloaderGUI:
         for item_id in self.history_tree.get_children():
             self.history_tree.delete(item_id)
 
-        history_entries = load_history(limit=12)
+        limit = max(1, int(self.history_limit_var.get().strip() or "12"))
+        history_entries = load_history(limit=limit)
         for entry in reversed(history_entries):
             self.history_tree.insert(
                 "",
@@ -453,18 +509,27 @@ class DownloaderGUI:
         label = "item" if total == 1 else "itens"
         self.history_count_var.set(f"Historico: {total} {label}")
 
+    def _clear_history(self) -> None:
+        clear_history()
+        self._refresh_history()
+        self.status_var.set("Historico limpo.")
+
     def _bind_preference_updates(self) -> None:
         for variable in (
             self.destination_var,
             self.media_var,
             self.audio_quality_var,
             self.video_quality_var,
+            self.auto_open_folder_var,
+            self.show_completion_popup_var,
+            self.history_limit_var,
         ):
             variable.trace_add("write", self._on_preferences_changed)
 
     def _on_preferences_changed(self, *_args: object) -> None:
         self._save_preferences()
         self._refresh_quality_state()
+        self._refresh_history()
 
     def _save_preferences(self) -> None:
         save_preferences(
@@ -473,6 +538,9 @@ class DownloaderGUI:
                 "media_format": self.media_var.get().strip() or "mp3",
                 "audio_quality": self.audio_quality_var.get().strip() or "128",
                 "video_quality": self.video_quality_var.get().strip() or "best",
+                "auto_open_folder": self.auto_open_folder_var.get(),
+                "show_completion_popup": self.show_completion_popup_var.get(),
+                "history_limit": max(1, int(self.history_limit_var.get().strip() or "12")),
             }
         )
 
