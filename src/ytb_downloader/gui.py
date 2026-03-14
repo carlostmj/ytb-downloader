@@ -6,7 +6,7 @@ from pathlib import Path
 from .config import WINDOW_TITLE, default_download_dir
 from .downloader import download
 from .models import DownloadRequest
-from .utils import load_batch_entries, normalize_destination, normalize_video_input
+from .utils import dedupe_entries, display_video_input, load_batch_entries, normalize_destination, normalize_video_input, open_in_file_manager
 
 
 class DownloaderGUI:
@@ -24,6 +24,7 @@ class DownloaderGUI:
 
         self.queue: list[dict[str, str]] = []
         self.is_downloading = False
+        self.stop_requested = False
 
         self.link_var = tk.StringVar()
         self.destination_var = tk.StringVar(value=str(default_download_dir()))
@@ -124,12 +125,25 @@ class DownloaderGUI:
         actions.columnconfigure(0, weight=1)
         actions.columnconfigure(1, weight=1)
         actions.columnconfigure(2, weight=1)
-        self.ttk.Button(actions, text="Adicionar a fila", style="Accent.TButton", command=self._add_current_entry).grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        self.ttk.Button(actions, text="Importar TXT", command=self._import_txt).grid(row=0, column=1, sticky="ew", padx=4)
-        self.ttk.Button(actions, text="Baixar agora", command=self._start_queue).grid(row=0, column=2, sticky="ew", padx=(8, 0))
+        self.add_button = self.ttk.Button(actions, text="Adicionar a fila", style="Accent.TButton", command=self._add_current_entry)
+        self.add_button.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self.import_button = self.ttk.Button(actions, text="Importar TXT", command=self._import_txt)
+        self.import_button.grid(row=0, column=1, sticky="ew", padx=4)
+        self.download_button = self.ttk.Button(actions, text="Baixar agora", command=self._start_queue)
+        self.download_button.grid(row=0, column=2, sticky="ew", padx=(8, 0))
+
+        utility_actions = self.ttk.Frame(parent, style="Card.TFrame")
+        utility_actions.grid(row=10, column=0, columnspan=2, sticky="ew", pady=(16, 0))
+        utility_actions.columnconfigure(0, weight=1)
+        utility_actions.columnconfigure(1, weight=1)
+        self.open_folder_button = self.ttk.Button(utility_actions, text="Abrir downloads", command=self._open_downloads_folder)
+        self.open_folder_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.stop_button = self.ttk.Button(utility_actions, text="Parar apos atual", command=self._request_stop)
+        self.stop_button.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        self.stop_button.state(["disabled"])
 
         progress = self.ttk.Frame(parent, style="Card.TFrame")
-        progress.grid(row=9, column=0, columnspan=2, sticky="ew")
+        progress.grid(row=11, column=0, columnspan=2, sticky="ew")
         progress.columnconfigure(0, weight=1)
         self.progress_bar = self.ttk.Progressbar(progress, mode="indeterminate")
         self.progress_bar.grid(row=0, column=0, sticky="ew")
@@ -162,8 +176,10 @@ class DownloaderGUI:
         queue_actions.grid(row=3, column=0, sticky="ew", pady=(14, 0))
         queue_actions.columnconfigure(0, weight=1)
         queue_actions.columnconfigure(1, weight=1)
-        self.ttk.Button(queue_actions, text="Remover selecionado", command=self._remove_selected).grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        self.ttk.Button(queue_actions, text="Limpar fila", command=self._clear_queue).grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        self.remove_button = self.ttk.Button(queue_actions, text="Remover selecionado", command=self._remove_selected)
+        self.remove_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.clear_button = self.ttk.Button(queue_actions, text="Limpar fila", command=self._clear_queue)
+        self.clear_button.grid(row=0, column=1, sticky="ew", padx=(6, 0))
 
     def _refresh_quality_state(self) -> None:
         is_audio = self.media_var.get() == "mp3"
@@ -187,15 +203,9 @@ class DownloaderGUI:
             return
 
         quality = self.audio_quality_var.get() if self.media_var.get() == "mp3" else self.video_quality_var.get()
-        item = {
-            "source": normalized,
-            "display": raw_value,
-            "format": self.media_var.get(),
-            "quality": quality,
-            "status": "Na fila",
-        }
-        self.queue.append(item)
-        self.queue_tree.insert("", "end", values=(raw_value, self.media_var.get().upper(), quality, "Na fila"))
+        if not self._append_queue_item(normalized, raw_value, self.media_var.get(), quality):
+            messagebox.showinfo(WINDOW_TITLE, "Esse item ja esta na fila.")
+            return
         self.link_var.set("")
         self._update_queue_count()
         self.status_var.set("Item adicionado a fila.")
@@ -209,27 +219,19 @@ class DownloaderGUI:
         if not path:
             return
 
-        entries = load_batch_entries(path)
+        entries = dedupe_entries(load_batch_entries(path))
         if not entries:
             messagebox.showerror(WINDOW_TITLE, "Nenhum link ou ID valido foi encontrado no TXT.")
             return
 
         quality = self.audio_quality_var.get() if self.media_var.get() == "mp3" else self.video_quality_var.get()
+        added_count = 0
         for entry in entries:
-            display = self._display_name(entry)
-            self.queue.append(
-                {
-                    "source": entry,
-                    "display": display,
-                    "format": self.media_var.get(),
-                    "quality": quality,
-                    "status": "Na fila",
-                }
-            )
-            self.queue_tree.insert("", "end", values=(display, self.media_var.get().upper(), quality, "Na fila"))
+            if self._append_queue_item(entry, display_video_input(entry), self.media_var.get(), quality):
+                added_count += 1
 
         self._update_queue_count()
-        self.status_var.set(f"TXT importado: {len(entries)} item(ns) adicionados.")
+        self.status_var.set(f"TXT importado: {added_count} item(ns) adicionados.")
 
     def _remove_selected(self) -> None:
         selected = self.queue_tree.selection()
@@ -264,6 +266,8 @@ class DownloaderGUI:
             return
 
         self.is_downloading = True
+        self.stop_requested = False
+        self._set_controls_enabled(False)
         self.progress_bar.start(9)
         self.status_var.set("Fila iniciada...")
         threading.Thread(target=self._process_queue, daemon=True).start()
@@ -271,8 +275,13 @@ class DownloaderGUI:
     def _process_queue(self) -> None:
         destination = normalize_destination(self.destination_var.get().strip() or None, default_download_dir())
         results: list[str] = []
+        queue_snapshot = list(self.queue)
 
-        for index, item in enumerate(self.queue):
+        for index, item in enumerate(queue_snapshot):
+            if self.stop_requested:
+                results.append("Parado")
+                self._set_row_status(index, "Parado")
+                continue
             self._set_row_status(index, "Baixando")
             self._set_status(f"Baixando {index + 1}/{len(self.queue)}: {item['display']}")
 
@@ -288,17 +297,28 @@ class DownloaderGUI:
             final_status = "Concluido" if result.success else "Erro"
             self._set_row_status(index, final_status)
             results.append(final_status)
+            if self.stop_requested:
+                for remaining_index in range(index + 1, len(queue_snapshot)):
+                    self._set_row_status(remaining_index, "Parado")
+                    results.append("Parado")
+                break
 
         success_count = sum(1 for item in results if item == "Concluido")
         self.root.after(0, self.progress_bar.stop)
-        self.root.after(0, lambda: self._finish_queue(success_count, len(results)))
+        self.root.after(0, lambda: self._finish_queue(success_count, len(queue_snapshot), results))
 
-    def _finish_queue(self, success_count: int, total: int) -> None:
+    def _finish_queue(self, success_count: int, total: int, results: list[str]) -> None:
         from tkinter import messagebox
 
         self.is_downloading = False
-        self.status_var.set(f"Fila finalizada: {success_count}/{total} concluido(s).")
-        messagebox.showinfo(WINDOW_TITLE, f"Fila finalizada: {success_count}/{total} download(s) concluido(s).")
+        self.stop_requested = False
+        self._set_controls_enabled(True)
+        stopped_count = sum(1 for item in results if item == "Parado")
+        self.status_var.set(f"Fila finalizada: {success_count}/{total} concluido(s), {stopped_count} parado(s).")
+        messagebox.showinfo(
+            WINDOW_TITLE,
+            f"Fila finalizada: {success_count}/{total} download(s) concluido(s), {stopped_count} parado(s).",
+        )
 
     def _set_status(self, message: str) -> None:
         self.root.after(0, lambda: self.status_var.set(message))
@@ -320,11 +340,46 @@ class DownloaderGUI:
         label = "item" if total == 1 else "itens"
         self.queue_count_var.set(f"Fila: {total} {label}")
 
-    @staticmethod
-    def _display_name(entry: str) -> str:
-        if "watch?v=" in entry:
-            return entry.split("watch?v=", 1)[1][:11]
-        return Path(entry).name or entry
+    def _append_queue_item(self, source: str, display: str, media_format: str, quality: str) -> bool:
+        for existing_item in self.queue:
+            if existing_item["source"] == source and existing_item["format"] == media_format and existing_item["quality"] == quality:
+                return False
+        self.queue.append(
+            {
+                "source": source,
+                "display": display_video_input(display),
+                "format": media_format,
+                "quality": quality,
+                "status": "Na fila",
+            }
+        )
+        self.queue_tree.insert("", "end", values=(display_video_input(display), media_format.upper(), quality, "Na fila"))
+        return True
+
+    def _set_controls_enabled(self, enabled: bool) -> None:
+        state = ["!disabled"] if enabled else ["disabled"]
+        stop_state = ["disabled"] if enabled else ["!disabled"]
+        for widget in (
+            self.add_button,
+            self.import_button,
+            self.download_button,
+            self.remove_button,
+            self.clear_button,
+            self.open_folder_button,
+        ):
+            widget.state(state)
+        self.stop_button.state(stop_state)
+
+    def _open_downloads_folder(self) -> None:
+        from tkinter import messagebox
+
+        destination = normalize_destination(self.destination_var.get().strip() or None, default_download_dir())
+        if not open_in_file_manager(destination):
+            messagebox.showerror(WINDOW_TITLE, "Nao foi possivel abrir a pasta de downloads neste sistema.")
+
+    def _request_stop(self) -> None:
+        self.stop_requested = True
+        self.status_var.set("Parada solicitada. A fila sera encerrada apos o item atual.")
 
     def run(self) -> None:
         self.root.mainloop()

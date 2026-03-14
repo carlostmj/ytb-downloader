@@ -8,7 +8,14 @@ from .downloader import download
 from .installer import install_shortcut
 from .interactive import run_interactive_mode
 from .models import DownloadRequest
-from .utils import build_terminal_progress_callback, load_batch_entries, normalize_destination, normalize_video_input
+from .utils import (
+    build_terminal_progress_callback,
+    dedupe_entries,
+    display_video_input,
+    load_batch_entries,
+    normalize_destination,
+    normalize_video_input,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -62,15 +69,21 @@ def run_cli(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         return 1
 
     destination = normalize_destination(args.local, default_download_dir())
-    entries = [normalize_video_input(args.link)] if args.link else load_batch_entries(args.list)
+    entries: list[str] = []
+    if args.link:
+        entries.append(normalize_video_input(args.link))
+    if args.list:
+        entries.extend(load_batch_entries(args.list))
+    entries = dedupe_entries([entry for entry in entries if entry])
     if not entries:
         print("Nenhum link valido encontrado.")
         return 1
 
     success_count = 0
+    failed_entries: list[str] = []
     for index, entry in enumerate(entries, start=1):
         if len(entries) > 1:
-            print(f"[{index}/{len(entries)}] {entry}")
+            print(f"[{index}/{len(entries)}] {display_video_input(entry)}")
         request = DownloadRequest(
             link=entry,
             destination=destination,
@@ -86,8 +99,14 @@ def run_cli(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         print(result.message)
         if result.success:
             success_count += 1
+        else:
+            failed_entries.append(display_video_input(entry))
 
     print(f"Destino: {destination}")
     if len(entries) > 1:
         print(f"Fila finalizada: {success_count}/{len(entries)} concluido(s).")
+    if failed_entries:
+        print("Falharam:")
+        for failed_entry in failed_entries:
+            print(f"- {failed_entry}")
     return 0 if success_count == len(entries) else 1

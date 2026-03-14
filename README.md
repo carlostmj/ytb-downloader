@@ -18,6 +18,12 @@ Repositorio sugerido:
 https://github.com/carlostmj/ytb-downloader
 ```
 
+## Projeto
+
+- Autor: **CarlosTMJ**
+- GitHub: `https://github.com/carlostmj`
+- Changelog: [CHANGELOG.md](/home/carlos/Desktop/ytb-downloader/CHANGELOG.md)
+
 ## Requisitos
 
 - Python 3.10+
@@ -102,6 +108,12 @@ Baixar em lote a partir de um TXT:
 ytb-downloader --mp3 --list "/caminho/links.txt"
 ```
 
+Misturar um link direto com uma lista:
+
+```bash
+ytb-downloader --mp3 --link "dgn0egjhDJs" --list "/caminho/links.txt"
+```
+
 Escolher qualidade:
 
 ```bash
@@ -144,6 +156,19 @@ https://www.youtube.com/watch?v=dgn0egjhDJs
 # comentarios sao ignorados
 ```
 
+Itens repetidos sao removidos automaticamente na fila da CLI e da GUI.
+
+## GUI
+
+A interface grafica agora permite:
+
+- colar URL completa ou apenas o ID do video
+- importar TXT com um item por linha
+- remover duplicados da fila
+- abrir a pasta de downloads
+- parar a fila apos o item atual
+- escolher qualidade de audio e video
+
 ## Publicar no GitHub
 
 ```bash
@@ -153,6 +178,37 @@ git commit -m "feat: initial release"
 git branch -M main
 git remote add origin https://github.com/carlostmj/ytb-downloader.git
 git push -u origin main
+```
+
+## Atualizar com changelog real
+
+Para cada melhoria nova:
+
+```bash
+git checkout master
+git pull
+```
+
+1. Atualize `CHANGELOG.md` em `Unreleased`.
+2. Faça as mudancas no codigo.
+3. Gere um commit claro, por exemplo:
+
+```bash
+git add .
+git commit -m "feat: improve GUI queue workflow"
+```
+
+Quando quiser fechar uma versao:
+
+1. Troque `Unreleased` por uma nova versao, por exemplo `0.2.0`.
+2. Atualize a versao em `pyproject.toml`.
+3. Crie uma tag:
+
+```bash
+git add .
+git commit -m "chore: release 0.2.0"
+git tag v0.2.0
+git push origin master --tags
 ```
 
 ## Licenca
