@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 downloads/
 history.json
+preferences.json
 dist/
 build/
 *.egg-info/

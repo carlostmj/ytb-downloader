@@ -8,6 +8,7 @@ APP_NAME = "ytb-downloader"
 WINDOW_TITLE = "YTB Downloader"
 DOWNLOAD_FOLDER_NAME = "downloads"
 HISTORY_FILE_NAME = "history.json"
+PREFERENCES_FILE_NAME = "preferences.json"
 DEFAULT_TEMPLATE = "%(title)s.%(ext)s"
 
 
@@ -21,6 +22,10 @@ def default_download_dir() -> Path:
 
 def history_file() -> Path:
     return project_root() / HISTORY_FILE_NAME
+
+
+def preferences_file() -> Path:
+    return project_root() / PREFERENCES_FILE_NAME
 
 
 def user_bin_dir() -> Path:

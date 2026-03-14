@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import re
-from typing import Callable
+from typing import Any, Callable
 
 from .history import append_history
 from .models import DownloadRequest, DownloadResult
 from .utils import ensure_directory
 
-ProgressCallback = Callable[[str], None]
+ProgressCallback = Callable[[dict[str, Any]], None]
 CancelCheck = Callable[[], bool]
 
 
@@ -25,11 +25,33 @@ def _progress_hook(callback: ProgressCallback | None, cancel_check: CancelCheck 
         if status == "downloading":
             downloaded = data.get("_percent_str", "").strip()
             speed = data.get("_speed_str", "").strip()
-            callback(f"Baixando... {downloaded} {speed}".strip())
+            callback(
+                {
+                    "status": status,
+                    "percent": _normalize_percent(downloaded),
+                    "speed": speed,
+                    "message": f"Baixando... {downloaded} {speed}".strip(),
+                }
+            )
         elif status == "finished":
-            callback("Download concluido, processando arquivo...")
+            callback(
+                {
+                    "status": status,
+                    "percent": 100.0,
+                    "speed": "",
+                    "message": "Download concluido, processando arquivo...",
+                }
+            )
 
     return hook
+
+
+def _normalize_percent(raw_value: str) -> float:
+    cleaned = raw_value.replace("%", "").strip()
+    try:
+        return float(cleaned)
+    except ValueError:
+        return 0.0
 
 
 def normalize_bitrate(raw_value: str | int | None) -> str:

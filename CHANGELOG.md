@@ -13,12 +13,14 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - CLI batch summary listing failed entries after the queue finishes.
 - Shared deduplication for repeated items in TXT imports and CLI batch processing.
 - Persistent download history stored locally and displayed inside the GUI.
+- Persistent GUI preferences for destination folder, selected format and chosen quality values.
 
 ### Changed
 
 - CLI now accepts `--link` together with `--list`, merging both sources into a single deduplicated queue.
 - GUI now blocks queue-editing actions while downloads are running to avoid inconsistent state.
 - GUI stop control now performs real in-progress cancellation instead of only stopping after the current item.
+- GUI progress area now shows real per-item percentage and queue progress instead of only an indeterminate bar.
 
 ### Fixed
 

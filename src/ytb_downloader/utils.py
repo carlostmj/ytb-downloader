@@ -5,7 +5,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 YOUTUBE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
 YOUTUBE_WATCH_PREFIX = "https://www.youtube.com/watch?v="
@@ -23,11 +23,12 @@ def normalize_destination(raw_path: str | None, fallback: Path) -> Path:
     return ensure_directory(fallback.resolve())
 
 
-def build_terminal_progress_callback(hide_progress: bool) -> Callable[[str], None] | None:
+def build_terminal_progress_callback(hide_progress: bool) -> Callable[[dict[str, Any]], None] | None:
     if hide_progress:
         return None
 
-    def callback(message: str) -> None:
+    def callback(event: dict[str, Any]) -> None:
+        message = str(event.get("message", "")).strip()
         print(f"\r{message:<100}", end="", flush=True)
 
     return callback

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import threading
+from typing import Any
 
 from .config import WINDOW_TITLE, default_download_dir
 from .downloader import download
 from .history import load_history
 from .models import DownloadRequest
+from .preferences import load_preferences, save_preferences
 from .utils import dedupe_entries, display_video_input, load_batch_entries, normalize_destination, normalize_video_input, open_in_file_manager
 
 
@@ -22,22 +24,26 @@ class DownloaderGUI:
         self.root.minsize(860, 620)
         self.root.configure(bg="#f4efe6")
 
+        self.preferences = load_preferences()
         self.queue: list[dict[str, str]] = []
         self.is_downloading = False
         self.stop_requested = False
 
         self.link_var = tk.StringVar()
-        self.destination_var = tk.StringVar(value=str(default_download_dir()))
-        self.media_var = tk.StringVar(value="mp3")
-        self.audio_quality_var = tk.StringVar(value="128")
-        self.video_quality_var = tk.StringVar(value="best")
+        self.destination_var = tk.StringVar(value=self.preferences["destination"])
+        self.media_var = tk.StringVar(value=self.preferences["media_format"])
+        self.audio_quality_var = tk.StringVar(value=self.preferences["audio_quality"])
+        self.video_quality_var = tk.StringVar(value=self.preferences["video_quality"])
         self.status_var = tk.StringVar(value="Pronto. Cole um link, um ID do video ou importe um TXT.")
         self.queue_count_var = tk.StringVar(value="Fila: 0 item")
         self.history_count_var = tk.StringVar(value="Historico: 0 item")
+        self.current_progress_var = tk.StringVar(value="Progresso atual: 0%")
+        self.queue_progress_var = tk.StringVar(value="Andamento da fila: 0/0")
 
         self._configure_styles()
         self._build()
         self._refresh_quality_state()
+        self._bind_preference_updates()
 
     def _configure_styles(self) -> None:
         style = self.ttk.Style()
@@ -146,9 +152,11 @@ class DownloaderGUI:
         progress = self.ttk.Frame(parent, style="Card.TFrame")
         progress.grid(row=11, column=0, columnspan=2, sticky="ew")
         progress.columnconfigure(0, weight=1)
-        self.progress_bar = self.ttk.Progressbar(progress, mode="indeterminate")
+        self.progress_bar = self.ttk.Progressbar(progress, mode="determinate", maximum=100)
         self.progress_bar.grid(row=0, column=0, sticky="ew")
-        self.ttk.Label(progress, textvariable=self.status_var, style="Body.TLabel", wraplength=470).grid(row=1, column=0, sticky="w", pady=(10, 0))
+        self.ttk.Label(progress, textvariable=self.current_progress_var, style="Body.TLabel").grid(row=1, column=0, sticky="w", pady=(10, 0))
+        self.ttk.Label(progress, textvariable=self.queue_progress_var, style="Body.TLabel").grid(row=2, column=0, sticky="w", pady=(4, 0))
+        self.ttk.Label(progress, textvariable=self.status_var, style="Body.TLabel", wraplength=470).grid(row=3, column=0, sticky="w", pady=(8, 0))
 
     def _build_queue(self, parent) -> None:
         parent.columnconfigure(0, weight=1)
@@ -213,6 +221,7 @@ class DownloaderGUI:
         selected = filedialog.askdirectory(initialdir=self.destination_var.get() or str(default_download_dir()))
         if selected:
             self.destination_var.set(selected)
+            self._save_preferences()
 
     def _add_current_entry(self) -> None:
         from tkinter import messagebox
@@ -289,7 +298,10 @@ class DownloaderGUI:
         self.is_downloading = True
         self.stop_requested = False
         self._set_controls_enabled(False)
-        self.progress_bar.start(9)
+        self.progress_bar.configure(value=0)
+        self.current_progress_var.set("Progresso atual: 0%")
+        self.queue_progress_var.set(f"Andamento da fila: 0/{len(self.queue)}")
+        self._save_preferences()
         self.status_var.set("Fila iniciada...")
         threading.Thread(target=self._process_queue, daemon=True).start()
 
@@ -304,6 +316,7 @@ class DownloaderGUI:
                 self._set_row_status(index, "Cancelado")
                 continue
             self._set_row_status(index, "Baixando")
+            self._set_queue_progress(index, len(queue_snapshot))
             self._set_status(f"Baixando {index + 1}/{len(self.queue)}: {item['display']}")
 
             request = DownloadRequest(
@@ -314,7 +327,7 @@ class DownloaderGUI:
                 audio_bitrate=item["quality"] if item["format"] == "mp3" else self.audio_quality_var.get(),
                 video_quality=item["quality"] if item["format"] == "mp4" else self.video_quality_var.get(),
             )
-            result = download(request, callback=self._set_status, cancel_check=lambda: self.stop_requested)
+            result = download(request, callback=self._update_progress, cancel_check=lambda: self.stop_requested)
             final_status = "Cancelado" if result.cancelled else ("Concluido" if result.success else "Erro")
             self._set_row_status(index, final_status)
             results.append(final_status)
@@ -325,7 +338,7 @@ class DownloaderGUI:
                 break
 
         success_count = sum(1 for item in results if item == "Concluido")
-        self.root.after(0, self.progress_bar.stop)
+        self.root.after(0, lambda: self.progress_bar.configure(value=0))
         self.root.after(0, lambda: self._finish_queue(success_count, len(queue_snapshot), results))
 
     def _finish_queue(self, success_count: int, total: int, results: list[str]) -> None:
@@ -336,6 +349,8 @@ class DownloaderGUI:
         self._set_controls_enabled(True)
         cancelled_count = sum(1 for item in results if item == "Cancelado")
         self._refresh_history()
+        self.current_progress_var.set("Progresso atual: 0%")
+        self.queue_progress_var.set(f"Andamento da fila: {total}/{total}")
         self.status_var.set(f"Fila finalizada: {success_count}/{total} concluido(s), {cancelled_count} cancelado(s).")
         messagebox.showinfo(
             WINDOW_TITLE,
@@ -344,6 +359,17 @@ class DownloaderGUI:
 
     def _set_status(self, message: str) -> None:
         self.root.after(0, lambda: self.status_var.set(message))
+
+    def _update_progress(self, event: dict[str, Any]) -> None:
+        message = str(event.get("message", "")).strip()
+        percent = float(event.get("percent", 0.0) or 0.0)
+
+        def update() -> None:
+            self.progress_bar.configure(value=max(0.0, min(100.0, percent)))
+            self.current_progress_var.set(f"Progresso atual: {percent:.1f}%")
+            self.status_var.set(message)
+
+        self.root.after(0, update)
 
     def _set_row_status(self, index: int, status: str) -> None:
         def update_row() -> None:
@@ -361,6 +387,9 @@ class DownloaderGUI:
         total = len(self.queue)
         label = "item" if total == 1 else "itens"
         self.queue_count_var.set(f"Fila: {total} {label}")
+
+    def _set_queue_progress(self, completed_before_current: int, total: int) -> None:
+        self.root.after(0, lambda: self.queue_progress_var.set(f"Andamento da fila: {completed_before_current}/{total}"))
 
     def _append_queue_item(self, source: str, display: str, media_format: str, quality: str) -> bool:
         for existing_item in self.queue:
@@ -423,6 +452,29 @@ class DownloaderGUI:
         total = len(history_entries)
         label = "item" if total == 1 else "itens"
         self.history_count_var.set(f"Historico: {total} {label}")
+
+    def _bind_preference_updates(self) -> None:
+        for variable in (
+            self.destination_var,
+            self.media_var,
+            self.audio_quality_var,
+            self.video_quality_var,
+        ):
+            variable.trace_add("write", self._on_preferences_changed)
+
+    def _on_preferences_changed(self, *_args: object) -> None:
+        self._save_preferences()
+        self._refresh_quality_state()
+
+    def _save_preferences(self) -> None:
+        save_preferences(
+            {
+                "destination": self.destination_var.get().strip() or str(default_download_dir()),
+                "media_format": self.media_var.get().strip() or "mp3",
+                "audio_quality": self.audio_quality_var.get().strip() or "128",
+                "video_quality": self.video_quality_var.get().strip() or "best",
+            }
+        )
 
     def run(self) -> None:
         self.root.mainloop()

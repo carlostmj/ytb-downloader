@@ -169,8 +169,11 @@ A interface grafica agora permite:
 - abrir a pasta de downloads
 - cancelar o download atual de verdade
 - escolher qualidade de audio e video
+- lembrar pasta, formato e qualidade usados por ultimo
+- mostrar percentual real do item atual e andamento da fila
 
 O historico fica salvo localmente em `history.json` na raiz do projeto.
+As preferencias da GUI ficam salvas localmente em `preferences.json` na raiz do projeto.
 
 ## Publicar no GitHub
 
